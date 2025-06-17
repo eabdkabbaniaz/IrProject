@@ -1,0 +1,7 @@
+# تجاهل الملفات الكبيرة
+datasets/dataset_antic/inverted_index.json
+datasets/dataset_antic/*.csv
+*.pkl
+
+# تجاهل المجلد الكامل (اختياري)
+# datasets/
