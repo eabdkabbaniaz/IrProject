@@ -115,10 +115,7 @@ class TextProcessor:
         words = self.tokenizer.tokenize(text)
         filtered_words = [word for word in words if word.lower() not in self.stop_words]
         return ' '.join(filtered_words)
-    # def remove_stopwords(self, text):
-    #     words = self.tokenizer.tokenize(text)
-    #     filtered_words = [word for word in words if word.lower() not in self.stop_words]
-    #     return ' '.join(filtered_words)
+  
 
     def remove_punctuation(self, text):
         return re.sub(r'[^\w\s]', '', text)
@@ -171,15 +168,7 @@ class TextProcessor:
 #     words_to_remove = set(w.lower() for w in file.read().splitlines())
 #     text = processor.remove_stopwords(text)
    
-#     text = processor.lemmatization_example(text)
-#     text = processor.number_to_words(text)
-#     text = processor.remove_punctuation(text)
-#     text = processor.clean_text(text, words_to_remove)
-#     text = processor.expand_contractions(text)
-#     text = processor.normalize_unicode(text)
-#     text = processor.handle_negations(text)
-#     text = processor.remove_urls(text)
-#     return text
+
 
 # def process_text(text, processor):
 #     if text is None or pd.isna(text):
@@ -200,6 +189,47 @@ class TextProcessor:
 #     text = processor.spelling_correction(text)
 #     text = processor.stemming_example(text)           # أو lemmatization، اختر واحد فقط
 #     return text
+# def process_text(text, processor):
+#     if text is None or pd.isna(text):
+#         return ""
+#     text = str(text)
+#     text = processor.expand_contractions(text)
+#     text = processor.remove_html_tags(text)
+#     text = processor.normalize_unicode(text)
+#     text = processor.remove_urls(text)
+#     text = processor.cleaned_text(text)
+#     text = processor.normalization_example(text)  # lowercase
+#     text = processor.remove_punctuation(text)
+#     text = processor.remove_stopwords(text)       # ← هنا
+#     text = processor.number_to_words(text)
+#     text = processor.handle_negations(text)
+#     text = processor.remove_special_characters_and_emojis(text)
+#     text = processor.stemming_example(text)
+#     text = processor.lemmatization_example(text)
+#     return text
+
+# def process_text(text, processor):
+#     if text is None or pd.isna(text):
+#         return ""
+#     text = str(text)
+#     text = processor.expand_contractions(text)
+#     text = processor.remove_html_tags(text)
+#     text = processor.normalize_unicode(text)
+#     text = processor.remove_urls(text)
+#     text = processor.cleaned_text(text)
+#     text = processor.normalization_example(text)        # lowercase
+#     text = processor.remove_punctuation(text)
+#     text = processor.remove_stopwords(text)             # حذف الكلمات بعد lowercase/punctuation
+#     text = processor.number_to_words(text)
+#     text = processor.handle_negations(text)
+#     text = processor.remove_special_characters_and_emojis(text)
+    
+#     # استخدم فقط واحد:
+#     # text = processor.stemming_example(text)
+#     text = processor.lemmatization_example(text)
+
+#     return text
+
 def process_text(text, processor):
     if text is None or pd.isna(text):
         return ""
@@ -209,14 +239,14 @@ def process_text(text, processor):
     text = processor.normalize_unicode(text)
     text = processor.remove_urls(text)
     text = processor.cleaned_text(text)
-    text = processor.normalization_example(text)  # lowercase
+    text = processor.normalization_example(text)        # lowercase
     text = processor.remove_punctuation(text)
-    text = processor.remove_stopwords(text)       # ← هنا
     text = processor.number_to_words(text)
     text = processor.handle_negations(text)
     text = processor.remove_special_characters_and_emojis(text)
-    text = processor.stemming_example(text)
-    text = processor.lemmatization_example(text)
+    text = processor.lemmatization_example(text)         # أو stemming، واحد فقط
+    # إزالة الستوب وورد هنا بعد التعديلات كلها
+    text = processor.remove_stopwords(text)
     return text
 
 def main():
