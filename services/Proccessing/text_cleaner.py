@@ -1,6 +1,6 @@
 import pandas as pd
 import logging
-from text_cleaner import TextProcessor, process_text  # استدعاء من ملفك الحالي
+from services.Proccessing.TextProcessing import TextProcessor, process_text  # استدعاء من ملفك الحالي
 
 class TextCleaningService:
     def __init__(self):

@@ -5,7 +5,6 @@ import nltk
 from nltk import PorterStemmer, WordNetLemmatizer
 from nltk.corpus import stopwords, wordnet
 from spellchecker import SpellChecker
-
 import inflect
 import re
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
@@ -159,76 +158,7 @@ class TextProcessor:
         english_words = [word for word in words if wordnet.synsets(word)]
         return ' '.join(english_words)
 
-# def process_text(text, processor):
-#     if text is None or pd.isna(text):
-#         return ""
-#     text = str(text)
-#     text = processor.cleaned_text(text)
-#     text = processor.normalization_example(text)
-#     words_to_remove = set(w.lower() for w in file.read().splitlines())
-#     text = processor.remove_stopwords(text)
-   
 
-
-# def process_text(text, processor):
-#     if text is None or pd.isna(text):
-#         return ""
-
-#     text = str(text)
-#     text = processor.expand_contractions(text)
-#     text = processor.remove_urls(text)
-#     text = processor.remove_html_tags(text)
-#     text = processor.normalize_unicode(text)
-#     text = processor.cleaned_text(text)
-#     text = processor.normalization_example(text)      # lower
-#     text = processor.remove_punctuation(text)
-#     text = processor.clean_text(text, words_to_remove)
-#     text = processor.remove_stopwords(text)           # بعد punctuation و lowercase
-#     text = processor.handle_negations(text)
-#     text = processor.number_to_words(text)
-#     text = processor.spelling_correction(text)
-#     text = processor.stemming_example(text)           # أو lemmatization، اختر واحد فقط
-#     return text
-# def process_text(text, processor):
-#     if text is None or pd.isna(text):
-#         return ""
-#     text = str(text)
-#     text = processor.expand_contractions(text)
-#     text = processor.remove_html_tags(text)
-#     text = processor.normalize_unicode(text)
-#     text = processor.remove_urls(text)
-#     text = processor.cleaned_text(text)
-#     text = processor.normalization_example(text)  # lowercase
-#     text = processor.remove_punctuation(text)
-#     text = processor.remove_stopwords(text)       # ← هنا
-#     text = processor.number_to_words(text)
-#     text = processor.handle_negations(text)
-#     text = processor.remove_special_characters_and_emojis(text)
-#     text = processor.stemming_example(text)
-#     text = processor.lemmatization_example(text)
-#     return text
-
-# def process_text(text, processor):
-#     if text is None or pd.isna(text):
-#         return ""
-#     text = str(text)
-#     text = processor.expand_contractions(text)
-#     text = processor.remove_html_tags(text)
-#     text = processor.normalize_unicode(text)
-#     text = processor.remove_urls(text)
-#     text = processor.cleaned_text(text)
-#     text = processor.normalization_example(text)        # lowercase
-#     text = processor.remove_punctuation(text)
-#     text = processor.remove_stopwords(text)             # حذف الكلمات بعد lowercase/punctuation
-#     text = processor.number_to_words(text)
-#     text = processor.handle_negations(text)
-#     text = processor.remove_special_characters_and_emojis(text)
-    
-#     # استخدم فقط واحد:
-#     # text = processor.stemming_example(text)
-#     text = processor.lemmatization_example(text)
-
-#     return text
 
 def process_text(text, processor):
     if text is None or pd.isna(text):
@@ -245,60 +175,6 @@ def process_text(text, processor):
     text = processor.handle_negations(text)
     text = processor.remove_special_characters_and_emojis(text)
     text = processor.lemmatization_example(text)         # أو stemming، واحد فقط
-    # إزالة الستوب وورد هنا بعد التعديلات كلها
     text = processor.remove_stopwords(text)
     return text
 
-def main():
-    input_file = r'C:\Users\vision\Desktop\IrProject\datasets\dataset_antic\antique_documents.csv'
-    output_file = r'C:\Users\vision\Desktop\IrProject\datasets\dataset_antic\resualt.csv'
-    
-    # قراءة ملف CSV باستخدام pandas
-    try:
-        df = pd.read_csv(input_file, sep='\t', quoting=csv.QUOTE_ALL, on_bad_lines='warn')
-    except Exception as e:
-        logging.error(f"خطأ أثناء قراءة ملف CSV: {e}")
-        return
-    
-    text_processor = TextProcessor()
-    processed_rows = []
-    
-    # معالجة كل صف
-    for index, row in df.iterrows():
-        try:
-            doc_id = None
-            text = None
-            # التحقق مما إذا كان العمود الوحيد يحتوي على "doc_id,text"
-            if len(row) == 1 and 'doc_id,text' in row and pd.notna(row['doc_id,text']):
-                # محاولة تقسيم العمود الوحيد إلى doc_id و text
-                parts = row['doc_id,text'].split(',', 1)
-                if len(parts) == 2:
-                    doc_id = parts[0].strip()
-                    text = parts[1].strip().strip('"')
-                else:
-                    logging.warning(f"تخطي الصف {index} بسبب تنسيق غير صحيح: {row.to_dict()}")
-                    continue
-            elif len(row) >= 2 and pd.notna(row[1]):
-                # إذا كانت الصفوف تحتوي على عمودين أو أكثر
-                doc_id = str(row[0])
-                text = str(row[1])
-            else:
-                logging.warning(f"تخطي الصف {index} بسبب بيانات غير كافية: {row.to_dict()}")
-                continue
-            
-            # معالجة النص
-            processed_text = process_text(text, text_processor)
-            processed_rows.append([doc_id, processed_text])
-            print(processed_text + '\n')
-        except Exception as e:
-            logging.error(f"خطأ أثناء معالجة الصف {index}: {e}")
-    
-    # كتابة النتائج إلى ملف CSV
-    try:
-        pd.DataFrame(processed_rows, columns=['ID', 'Processed_Text']).to_csv(output_file, sep='\t', index=False)
-        logging.info(f"تم كتابة النتائج إلى {output_file}")
-    except Exception as e:
-        logging.error(f"خطأ أثناء كتابة ملف الإخراج: {e}")
-
-if __name__ == '__main__':
-    main()

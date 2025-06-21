@@ -23,3 +23,17 @@ class TFIDFPreviewRequest(BaseModel):
 class IndexRequest(BaseModel):
     input_path: str
     output_path: str
+
+
+
+
+class ProcessingRequest(BaseModel):
+    input_path: str
+    output_path: str
+    inverted_index_path: str
+    tfidf_output_path: str
+    
+class ViewRequest(BaseModel):
+    input_path: str
+    limit: int = 100
+
