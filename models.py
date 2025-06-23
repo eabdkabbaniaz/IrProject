@@ -53,3 +53,11 @@ class SearchBM25Request(BaseModel):
 class SearchBertRequest(BaseModel):
     query: str
     top_k: int
+
+class HybirdRequest(BaseModel):
+    query: str
+    input_path: str
+    model_path: str
+    k1: float
+    b: float
+    top_k: int
