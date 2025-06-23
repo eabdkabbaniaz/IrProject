@@ -1,1 +1,0 @@
-load_tfidf_vectorizer(vectorizer_file)

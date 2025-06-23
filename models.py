@@ -23,3 +23,33 @@ class TFIDFPreviewRequest(BaseModel):
 class IndexRequest(BaseModel):
     input_path: str
     output_path: str
+
+class ProcessingRequest(BaseModel):
+    input_path: str
+    output_path: str
+    inverted_index_path: str
+    tfidf_output_path: str
+    
+class ViewRequest(BaseModel):
+    input_path: str
+    limit: int = 100
+
+class BM25Request(BaseModel):
+    input_path: str
+    inverted_index_path:str
+    k1:float=1.5
+    b:float=0.75
+
+class BertRequest(BaseModel):
+    input_path: str
+    model_path: str
+  
+class SearchBM25Request(BaseModel):
+    query: str
+    k1: float
+    b: float
+    top_k: int
+
+class SearchBertRequest(BaseModel):
+    query: str
+    top_k: int
