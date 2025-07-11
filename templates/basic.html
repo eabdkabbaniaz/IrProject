@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Basic</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background: linear-gradient(to right, #1f1c2c, #928dab);
+      min-height: 100vh;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      padding: 40px 0;
+    }
+
+    .container {
+      max-width: 600px;
+      background-color: rgba(0, 0, 0, 0.6);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.4);
+    }
+
+    .form-label {
+      font-weight: 500;
+    }
+
+    .form-control {
+      background-color: #2e2e2e;
+      border: 1px solid #444;
+      color: #fff;
+    }
+
+    .form-control:focus {
+      border-color: #6c63ff;
+      box-shadow: 0 0 0 0.2rem rgba(108, 99, 255, 0.25);
+    }
+
+    .btn-custom {
+      background: #605cb1;
+      border: none;
+      color: white;
+      font-weight: bold;
+    }
+
+    .btn-custom:hover {
+      background: linear-gradient(to right, #48c6ef, #6c63ff);
+    }
+
+    .result-box {
+      background-color: #1c1c1c;
+      padding: 20px;
+      border-radius: 15px;
+      margin-top: 30px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.1);
+    }
+
+    h2 {
+      font-weight: bold;
+      margin-bottom: 30px;
+    }
+
+    #autocomplete-list {
+      position: absolute;
+      background-color: #3a3f58;
+      border: 1px solid #555;
+      border-top: none;
+      max-height: 200px;
+      overflow-y: auto;
+      width: 100%;
+      z-index: 999;
+      border-radius: 0 0 10px 10px;
+    }
+
+    #autocomplete-list li {
+      padding: 10px;
+      color: #fff;
+      cursor: pointer;
+      list-style-type: none;
+    }
+
+    #autocomplete-list li:hover {
+      background-color: #6c63ff;
+    }
+
+    .position-relative {
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="text-center">Basic Requirments</h2>
+    <form id="queryForm">
+      
+      <div class="mb-3">
+        <label for="model" class="form-label">Choose Model:</label>
+        <select class="form-control" id="model" name="model" required>
+          <option value="tfidf">TF-IDF</option>
+          <option value="bert">BERT</option>
+          <option value="sequential">sequential</option>
+        </select>
+      </div>
+
+      <div class="mb-3 position-relative">
+        <label for="query" class="form-label">Enter Query:</label>
+        <input type="text" class="form-control" id="query" name="query" required autocomplete="off" />
+      </div>
+      <button type="submit" class="btn btn-custom w-100">Submit</button>
+    </form>
+
+    <div id="result-box" class="result-box mt-4" style="display: none;"></div>
+  </div>
+
+  <script>
+    const queryInput  = document.getElementById("query");
+    const resultBox   = document.getElementById("result-box");
+    const form        = document.getElementById("queryForm");
+
+    const TFIDF_URL      = "{{ tfidf_url }}";
+    const BERT_URL       = "{{ bert_url }}";
+    const SEQUENTIAL_URL = "{{ sequential_url }}";
+  
+    form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const model = document.getElementById("model").value;
+    const query = queryInput.value.trim();
+    if (!query) return;
+
+    let suggestUrl = "";
+    let requestBody = {};
+
+    switch (model) {
+      case "tfidf":
+        suggestUrl = TFIDF_URL;
+        requestBody = {
+          query: query,
+          vectorizer_path: "D:\\IrProject\\datasets\\dataset_webis-touche2020\\tfidf_vectorizer_touche2020.joblib",
+          tfidf_matrix_path: "D:\\IrProject\\datasets\\dataset_webis-touche2020\\tfidf_matrix_touche2020.joblib",
+          corpus_path: "D:\\IrProject\\datasets\\dataset_webis-touche2020\\clean_docs.csv",
+          original_texts_path: "D:\\IrProject\\datasets\\dataset_webis-touche2020\\docs.tsv"
+        };
+        break;
+
+      case "bert":
+        suggestUrl = BERT_URL;
+        requestBody = {
+          query: query,
+          vector_path: "D:\\IrProject\\embeddings.joblib_doc_ids",
+          model_dir: "D:\\IrProject\\bert_model",
+          top_k: 10
+        };
+        break;
+
+      case "sequential":
+        suggestUrl = SEQUENTIAL_URL;
+        requestBody = {
+          query: query,
+          model_dir: "D:\\IrProject\\bert_model",
+          vector_path: "D:\\IrProject\\embeddings.joblib_doc_ids",
+          top_k: 10
+        };
+        break;
+    }
+
+    try {
+      const response = await fetch(suggestUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      const data = await response.json();
+      const suggestions = data.results || data.message || [];
+
+      resultBox.style.display = "block";
+      resultBox.innerHTML = `
+        <h5>Model: ${model.toUpperCase()}</h5>
+        <h5>Original Query:</h5>
+        <p>${query}</p>
+        <h5>Top Results:</h5>
+        <ul>${suggestions.map(item => {
+          if (typeof item === 'string') return `<li>${item}</li>`;
+          return `<li><strong>${item.doc_id || ''}</strong> - Score: ${item.score?.toFixed(3) || 'N/A'}<br/>${item.text || ''}</li>`;
+        }).join("")}</ul>
+      `;
+    } catch (err) {
+      resultBox.style.display = "block";
+      resultBox.innerHTML = `<p>حدث خطأ: ${err.message}</p>`;
+      console.error(err);
+    }
+  });
+  </script>
+  </body>
+</html>

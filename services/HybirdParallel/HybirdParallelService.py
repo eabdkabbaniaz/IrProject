@@ -3,7 +3,9 @@ from sentence_transformers import SentenceTransformer, util
 import torch
 import os
 import joblib
-from services.BM25.BM25Service import search 
+from services.BM25.BM25Service import search as bm25_search
+from services.Bert.BertService import search as bert_search     
+
 
 def reciprocal_rank_fusion(ranks_list, k=60):
     """
@@ -16,44 +18,53 @@ def reciprocal_rank_fusion(ranks_list, k=60):
             rrf_scores[pid] = rrf_scores.get(pid, 0) + 1 / (k + rank)
     return rrf_scores
 
+def hybird_parallel_represent(
+        query: str,
+        model_dir: str,
+        vector_path: str,
+        top_k_bm25: int = 25,
+        top_k_final: int = 10,
+        k_rrf: int = 60
+):
+    """
+    - يأخذ أفضل top_k_bm25 وثيقة من BM25
+    - يحسب ترتيب BERT‑Embeddings لهذه الوثائق
+    - يدمج الترتيبين باستخدام Reciprocal Rank Fusion (RRF)
+    - يُرجِع أفضل top_k_final وثيقة
+    """
 
-def hybird_parallel_represent(query, documents, model_path, k1=1.5, b=0.75, top_k=10):
-    if not os.path.exists(model_path):
-        raise ValueError("مسار النموذج غير موجود أو غير صالح.")
-
-    # 1. BM25 Results
-    bm25_results = search(query, k1, b, top_k=top_k)
-    if not bm25_results:
+    # ---------- 1) استرجاع BM25 ------------------------------------------
+    bm25_hits = bm25_search(query, top_k=top_k_bm25)
+    if not bm25_hits:
         return []
 
-    bm25_ranks = {item["doc_id"]: rank + 1 for rank, item in enumerate(bm25_results)}
+    bm25_ranks = {hit["doc_id"]: rank + 1
+                  for rank, hit in enumerate(bm25_hits)}
     top_doc_ids = list(bm25_ranks.keys())
 
-    # 2. Load corresponding documents
-    df = DataLoaderService.load(documents)
-    df = df[df["ID"].isin(top_doc_ids)]
-    df = df.set_index("ID").loc[top_doc_ids]
+    # ---------- 2) استرجاع ترتيب BERT لنفس الوثائق -----------------------
+    # نستدعى bert_search مع نفس vector_path/model_dir ثم نُبقى فقط ما يخص top_doc_ids
+    bert_hits_all = bert_search(query,
+                                vector_path=vector_path,
+                                model_dir=model_dir,
+                                top_k=len(top_doc_ids))       # نحصل على كل النتائج الممكنة
 
-    texts = df["Processed_Text"].tolist()
+    bert_ranks = {}
+    rank = 1
+    for hit in bert_hits_all:
+        pid = hit["doc_id"]
+        if pid in top_doc_ids:          # نأخذ فقط المشترَك مع قائمة BM25
+            bert_ranks[pid] = rank
+            rank += 1
+    # إذا كان بعض الـ pids لم يأتِ من bert  نعطيه رتبة كبيرة (بعد الأخير)
+    max_rank = rank
+    for pid in top_doc_ids:
+        if pid not in bert_ranks:
+            max_rank += 1
+            bert_ranks[pid] = max_rank
 
-    # 3. BERT Similarity
-    model = SentenceTransformer(model_path)
-    query_embedding = model.encode(query, convert_to_tensor=True)
-    doc_embeddings = model.encode(texts, convert_to_tensor=True)
+    # ---------- 3) دمج RRF ----------------------------------------------
+    fused = reciprocal_rank_fusion([bm25_ranks, bert_ranks], k=k_rrf)
+    best   = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k_final]
 
-    similarities = util.cos_sim(query_embedding, doc_embeddings)[0]
-    bert_results = [
-        {"doc_id": doc_id, "similarity": score.item()}
-        for doc_id, score in zip(top_doc_ids, similarities)
-    ]
-    bert_results = sorted(bert_results, key=lambda x: x["similarity"], reverse=True)
-    bert_ranks = {item["doc_id"]: rank + 1 for rank, item in enumerate(bert_results)}
-
-    # 4. Apply Reciprocal Rank Fusion
-    fused_scores = reciprocal_rank_fusion([bm25_ranks, bert_ranks])
-    sorted_results = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-
-    return [
-        {"doc_id": doc_id, "rrf_score": round(score, 4)}
-        for doc_id, score in sorted_results
-    ]
+    return [{"doc_id": pid, "rrf_score": round(score, 4)} for pid, score in best]

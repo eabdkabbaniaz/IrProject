@@ -1,6 +1,5 @@
 import csv
 import logging
-import pandas as pd
 import nltk
 from nltk import PorterStemmer, WordNetLemmatizer
 from nltk.corpus import stopwords, wordnet
@@ -13,24 +12,11 @@ import contractions
 from textblob import TextBlob
 import spacy
 
-# إعداد التسجيل (logging) لتتبع الأخطاء
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# تحميل نموذج spaCy
+# Load spaCy model for advanced text processing
 nlp = spacy.load('en_core_web_sm')
+with open(r"D:\IrProject\datasets\dataset_antic\stop_words.txt", 'r',encoding='utf-8') as file:
+    words_to_remove = file.read().splitlines()
 
-# تنزيل بيانات NLTK المطلوبة
-nltk.download('stopwords', quiet=True)
-nltk.download('wordnet', quiet=True)
-nltk.download('punkt', quiet=True)
-
-# تحميل كلمات الإزالة (افتراضًا أنها في ملف منفصل)
-try:
-    with open(r"C:\Users\vision\Desktop\IrProject\datasets\dataset_antic\stop_words.txt", 'r', encoding='utf-8') as file:
-        words_to_remove = file.read().splitlines()
-except FileNotFoundError:
-    logging.warning("ملف stop_words.txt غير موجود، سيتم استخدام قائمة فارغة")
-    words_to_remove = []
 
 class TextProcessor:
     def __init__(self):
@@ -38,7 +24,7 @@ class TextProcessor:
         self.lemmatizer = WordNetLemmatizer()
         self.spell_checker = SpellChecker()
         self.inflect_engine = inflect.engine()
-        self.stop_words = set(stopwords.words('english')).union(set(words_to_remove))
+        self.stop_words = set(stopwords.words('english'))
         self.tokenizer = nltk.tokenize.TreebankWordTokenizer()
 
     def spelling_correction(self, text):
@@ -53,38 +39,42 @@ class TextProcessor:
     def clean_text(self, text, words_to_remove):
         words = text.split()
         cleaned_words = [word for word in words if word not in words_to_remove]
-        return ' '.join(cleaned_words)
+        cleaned_text = ' '.join(cleaned_words)
+        return cleaned_text
 
     def number_to_words(self, text):
         words = self.tokenizer.tokenize(text)
         converted_words = []
         for word in words:
-            # Check if the word is purely numeric (integer)
-            if word.isdigit():
-                try:
-                    num = int(word)
-                    # You had a large number check, keep it if relevant, or simplify
-                    if num <= 999999999999999: # Ensure it's within inflect's reasonable range
-                        converted_word = self.inflect_engine.number_to_words(num) # Pass the integer
-                        converted_words.append(converted_word)
-                    else:
-                        converted_words.append("[Number Out of Range]")
-                except inflect.NumOutOfRangeError:
-                    converted_words.append("[Number Out of Range]")
-                except ValueError: # Catch potential errors if int() conversion fails unexpectedly
-                    converted_words.append(word) # Append original if conversion fails
+            if word.replace('.', '', 1).isdigit():
+                converted_words.append(word)
             else:
-                converted_words.append(word) # If not a digit, append as is
-    
+                if word.isdigit():
+                    try:
+                        num = int(word)
+                        if num <= 999999999999999:
+                            converted_word = self.inflect_engine.number_to_words(word)
+                            converted_words.append(converted_word)
+                        else:
+                            converted_words.append("[Number Out of Range]")
+                    except inflect.NumOutOfRangeError:
+                        converted_words.append("[Number Out of Range]")
+                else:
+                    converted_words.append(word)
         return ' '.join(converted_words)
 
     def remove_html_tags(self, text):
         try:
+
             if '<' in text and '>' in text:
                 return BeautifulSoup(text, "html.parser").get_text()
-            return text
+            else:
+
+                return text
         except MarkupResemblesLocatorWarning:
-            logging.warning("MarkupResemblesLocatorWarning: الإدخال يشبه اسم ملف أكثر من كونه ترميزًا.")
+
+            logging.warning("MarkupResemblesLocatorWarning: The input looks more like a filename than markup.")
+
             return text
 
     def normalize_unicode(self, text):
@@ -110,11 +100,11 @@ class TextProcessor:
         words = self.tokenizer.tokenize(text)
         lemmatized_words = [self.lemmatizer.lemmatize(word) for word in words]
         return ' '.join(lemmatized_words)
+
     def remove_stopwords(self, text):
         words = self.tokenizer.tokenize(text)
         filtered_words = [word for word in words if word.lower() not in self.stop_words]
         return ' '.join(filtered_words)
-  
 
     def remove_punctuation(self, text):
         return re.sub(r'[^\w\s]', '', text)
@@ -134,7 +124,7 @@ class TextProcessor:
         return ' '.join(synonym_words)
 
     def get_synonym(self, word):
-        synonyms = wordnet.synsets(word)
+        synonyms = nltk.corpus.wordnet.synsets(word)
         if synonyms:
             return synonyms[0].lemmas()[0].name()
         return word
@@ -158,23 +148,29 @@ class TextProcessor:
         english_words = [word for word in words if wordnet.synsets(word)]
         return ' '.join(english_words)
 
-
-
 def process_text(text, processor):
-    if text is None or pd.isna(text):
-        return ""
-    text = str(text)
-    text = processor.expand_contractions(text)
+    if text is None:
+        return text
+
+    # 1. إزالة العلامات الغريبة والعناوين HTML
     text = processor.remove_html_tags(text)
     text = processor.normalize_unicode(text)
-    text = processor.remove_urls(text)
+    text = processor.expand_contractions(text)
+
+    # 2. تنظيف النص من الرموز وتحويله لصيغة موحدة
     text = processor.cleaned_text(text)
-    text = processor.normalization_example(text)        # lowercase
+    text = processor.remove_urls(text)
     text = processor.remove_punctuation(text)
+    text = processor.normalization_example(text)  # تحويل إلى lowercase
+
+    # 3. تنظيف الكلمات
+    text = processor.clean_text(text, words_to_remove)  # كلمات مخصصة
+    text = processor.remove_stopwords(text)             # كلمات من nltk
+
+    # 4. المعالجة اللغوية
+    text = processor.stemming_example(text)
+    text = processor.lemmatization_example(text)
     text = processor.number_to_words(text)
     text = processor.handle_negations(text)
-    text = processor.remove_special_characters_and_emojis(text)
-    text = processor.lemmatization_example(text)         # أو stemming، واحد فقط
-    text = processor.remove_stopwords(text)
-    return text
 
+    return text

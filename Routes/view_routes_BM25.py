@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from models import BM25Request , SearchBM25Request
+from models.models import BM25Request , SearchBM25Request
 from controllers.viewBM25MatrixController import viewBM25MatrixController
 
 router = APIRouter()
@@ -12,5 +12,5 @@ def preview_BM25(data: BM25Request):
 
 @router.post("/preview-BM25Search")
 def BM25_search(data: SearchBM25Request):
-    result = controller.bm25_search(data.query, data.k1, data.b, data.top_k)
+    result = controller.bm25_search(data.query, data.top_k)
     return {"data": result}

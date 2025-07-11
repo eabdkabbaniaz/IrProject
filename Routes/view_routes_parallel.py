@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from models import HybirdRequest 
+from models.models import HybirdRequest 
 from controllers.viewHybirdParallelController import viewHybirdParallelController
 
 router = APIRouter()
@@ -7,5 +7,5 @@ controller = viewHybirdParallelController()
 
 @router.post("/preview-HybirdParallel")
 def hybird_parallel(data: HybirdRequest):
-    result = controller.hybird_parallel(data.query,data.input_path, data.model_path, data.k1, data.b, data.top_k)
+    result = controller.hybird_parallel(data.query, data.model_dir, data.vector_path, data.top_k)
     return {"data": result}

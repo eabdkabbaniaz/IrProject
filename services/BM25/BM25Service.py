@@ -1,148 +1,175 @@
 from services.Proccessing.data_loader import DataLoaderService
-from services.Clustering.InvertedIndex import InvertedIndex
+from services.InvertedIndex import InvertedIndex          
+from nltk.tokenize import word_tokenize
+from rank_bm25 import BM25Okapi
+from collections import defaultdict , Counter
 import pandas as pd
-from collections import defaultdict
 import numpy as np
-import math
 import joblib
 import os
+import json
+from services.Proccessing.TextProcessing import TextProcessor
+from scipy.sparse import lil_matrix
+from pathlib import Path
+from typing import Any, Dict, List
+from scipy.sparse import coo_matrix, save_npz
+from tqdm.auto import tqdm
 
-from nltk.tokenize import word_tokenize
+processor = TextProcessor()
+with open(r"D:\IrProject\datasets\dataset_antic\stop_words.txt", 'r',encoding='utf-8') as file:
+    words_to_remove = file.read().splitlines()
+    
+def process_text(text, processor):
+    if text is None:
+        return text
 
-def build_bm25_matrix(documents, inverted_index_path, k1=1.5, b=0.75):
-    df = DataLoaderService.load(documents)
+    text = processor.remove_html_tags(text)
+    text = processor.normalize_unicode(text)
+    text = processor.expand_contractions(text)
 
-    documents = {row['ID']: row['Processed_Text'].split() for _, row in df.iterrows()}
-    pids = list(documents.keys())
+    text = processor.cleaned_text(text)
+    text = processor.remove_urls(text)
+    text = processor.remove_punctuation(text)
+    text = processor.normalization_example(text)  
 
-    inverted_index = InvertedIndex.build_inverted_index(documents)
+    text = processor.clean_text(text, words_to_remove)  
+    text = processor.remove_stopwords(text)            
 
-    N = len(documents)
-    avgdl = sum(len(doc) for doc in documents.values()) / N
-    vocab = list(inverted_index.keys())
+    text = processor.stemming_example(text)
+    text = processor.lemmatization_example(text)
+    text = processor.number_to_words(text)
+    text = processor.handle_negations(text)
 
-    term_freqs = {}
-    doc_lengths = {}
+    return text
 
-    for pid, doc in documents.items():
-        tf = defaultdict(int)
-        for word in doc:
-            tf[word] += 1
-        term_freqs[pid] = tf
-        doc_lengths[pid] = len(doc)
+def build_bm25_matrix(
+    documents: Any,
+    inverted_index_path: str | Path,
+    k1: float = 1.5,
+    b: float = 0.75,
+    output_matrix_path: str | Path | None = "bm25_matrix.npz",
+) -> List[Dict[str, Any]]:
+   
+    # ---------------------------------------------------------------------
+    # 1. Load and prepare the corpus (vectorised, no Python loop per row)
+    # ---------------------------------------------------------------------
+    print("🔄 Loading documents …")
+    df = DataLoaderService.load(documents)[["ID", "Processed_Text"]]
+    df = df.dropna(subset=["Processed_Text"]).reset_index(drop=True)
+    print(f"✅ Loaded {len(df):,} documents with text.")
 
-    bm25_matrix = np.zeros((N, len(vocab)))
-    pid_to_index = {pid: i for i, pid in enumerate(pids)}
+    # Tokenise each document once. ``str.split`` is *much* faster vectorised
+    print("🪄 Tokenising corpus …")
+    tokenized_corpus: List[List[str]] = df["Processed_Text"].str.split().tolist()
+    pids: List[str] = df["ID"].astype(str).tolist()
+    print("✅ Tokenisation done.")
 
-    for j, term in enumerate(vocab):
-        df_term = len(inverted_index[term])
-        idf = math.log((N - df_term + 0.5) / (df_term + 0.5) + 1)
+    # ---------------------------------------------------------------------
+    # 2. Fit BM25 model (fast Cython code inside rank_bm25)
+    # ---------------------------------------------------------------------
+    print("⚙️  Fitting BM25 model …")
+    bm25 = BM25Okapi(tokenized_corpus, k1=k1, b=b)
+    print("✅ BM25 model ready.")
 
-        for pid in inverted_index[term]:
-            tf = term_freqs[pid][term]
-            dl = doc_lengths[pid]
-            denom = tf + k1 * (1 - b + b * dl / avgdl)
-            score = idf * ((tf * (k1 + 1)) / denom)
-            i = pid_to_index[pid]
-            bm25_matrix[i][j] = score
+    # ---------------------------------------------------------------------
+    # 3. Intersect vocabulary with inverted index keys (cheap set operation)
+    # ---------------------------------------------------------------------
+    print("📥 Loading inverted index …")
+    with open(inverted_index_path, "r", encoding="utf-8") as fp:
+        inverted_index = json.load(fp)
+    print(f"✅ Inverted index loaded. Terms: {len(inverted_index):,}.")
 
-    bm25_df = pd.DataFrame(bm25_matrix, columns=vocab)
-    bm25_df.insert(0, "doc_id", pids)
+    print("🔍 Building final vocabulary …")
+    vocab = sorted(t for t in inverted_index.keys() if t in bm25.idf)
+    print(f"✅ Vocabulary size: {len(vocab):,}.")
+    term_to_col: Dict[str, int] = {t: j for j, t in enumerate(vocab)}
 
-    records = bm25_df.to_dict(orient="records")
+    # ---------------------------------------------------------------------
+    # 4. Construct the sparse BM25 matrix in one pass over *documents*
+    # ---------------------------------------------------------------------
+    print("🏗️  Constructing sparse BM25 matrix …")
+    rows: List[int] = []
+    cols: List[int] = []
+    data: List[float] = []
 
-    cleaned_records = []
-    for record in records:
-        filtered_record = {"doc_id": record["doc_id"]}
-        for key, value in record.items():
-            if key != "doc_id" and value != 0.0:
-                filtered_record[key] = value
-        cleaned_records.append(filtered_record)
+    avgdl = bm25.avgdl  # small speed win for inner loop
+    tqdm_iter = tqdm(
+        enumerate(tokenized_corpus, start=0),
+        total=len(tokenized_corpus),
+        desc="📈 Scoring rows",
+    )
 
-    joblib.dump({"data": cleaned_records}, "bm25_matrix.joblib")
+    for i, tokens in tqdm_iter:
+        len_doc = len(tokens)
+        tf_counter = Counter(tokens)
+        for term, tf in tf_counter.items():
+            col = term_to_col.get(term)
+            if col is None:
+                continue  # term not in final vocab
+            idf = bm25.idf[term]
+            score = idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * len_doc / avgdl))
+            if score:
+                rows.append(i)
+                cols.append(col)
+                data.append(score)
 
-     # Save raw components for dynamic scoring later
-    bm25_raw = {
-        "term_freqs": term_freqs,
-        "doc_lengths": doc_lengths,
-        "avgdl": avgdl,
-        "idf": {
-            term: math.log((N - len(inverted_index[term]) + 0.5) / (len(inverted_index[term]) + 0.5) + 1)
-            for term in vocab
-        }
-    }
-    joblib.dump(bm25_raw, "bm25_raw_data.joblib")
+    bm25_matrix = coo_matrix((data, (rows, cols)), shape=(len(pids), len(vocab))).tocsr()
+    print(
+        f"✅ Matrix built. Non‑zero entries: {bm25_matrix.nnz:,} (density={bm25_matrix.nnz/ (len(pids)*len(vocab)):.4%})."
+    )
 
+    # ---------------------------------------------------------------------
+    # 5. Persist artefacts (matrix + model)
+    # ---------------------------------------------------------------------
+    if output_matrix_path is not None:
+        print(f"💾 Saving matrix to {output_matrix_path} …")
+        save_npz(output_matrix_path, bm25_matrix)
+        print("✅ Sparse matrix saved.")
+
+    print("💾 Saving BM25 model artefacts …")
+    joblib.dump({"bm25": bm25, "pids": pids, "vocab": vocab}, "bm25_model.joblib")
+    print("✅ BM25 model artefacts saved.")
+
+    # ---------------------------------------------------------------------
+    # 6. Stream cleaned_records from the sparse matrix (no dense DataFrame)
+    # ---------------------------------------------------------------------
+    print("🧹 Streaming cleaned records …")
+    cleaned_records: List[Dict[str, float]] = []
+    for i in range(bm25_matrix.shape[0]):
+        row = bm25_matrix.getrow(i)
+        indices = row.indices
+        values = row.data
+        record = {"doc_id": pids[i]}
+        record.update({vocab[idx]: float(val) for idx, val in zip(indices, values)})
+        cleaned_records.append(record)
+    print("✅ Done. Returning cleaned_records list.")
+
+    print("🎉 build_bm25_matrix finished successfully.")
     return cleaned_records
+    
+_bm25_tuple: tuple | None = None
+
+def _load_bm25():
+    global _bm25_tuple
+    if _bm25_tuple is None:
+        print("📦 Loading BM25 model into memory …")
+        data = joblib.load("bm25_model.joblib")
+        _bm25_tuple = data["bm25"], data["pids"], set(data["vocab"])
+    return _bm25_tuple
 
 
-def search(query, top_k=5):
-    query_terms = word_tokenize(query.lower())
-    matching_terms = [term for term in query_terms if term in bm25_df.columns]
+def search(query: str, top_k: int = 25):
+    bm25, pids, vocab = _load_bm25()
 
-    if not matching_terms:
-        return []
+    query_tokens = process_text(query,processor)
+    if isinstance(query_tokens, str):
+        query_tokens = query_tokens.split()
+    query_tokens = [t for t in query_tokens if t in vocab]
 
-    if k1 == default_k1 and b == default_b:
-        scores = bm25_df[matching_terms].sum(axis=1)
-        ranked = scores.sort_values(ascending=False)
-        return [(pid, score) for pid, score in ranked.items()]
+    top_k = min(top_k, len(pids))
+    best_pids = bm25.get_top_n(query_tokens, pids, n=top_k)
 
-    bm25_raw = joblib.load("bm25_raw_data.joblib")
-    tf = bm25_raw["term_freqs"]
-    dl = bm25_raw["doc_lengths"]
-    idf = bm25_raw["idf"]
-    avgdl = bm25_raw["avgdl"]
+    scores = bm25.get_scores(query_tokens)
+    score_map = {pid: float(scores[pids.index(pid)]) for pid in best_pids}
 
-    scores = {}
-    for pid in pids:
-        score = 0.0
-        for term in matching_terms:
-            f = tf[pid].get(term, 0)
-            doc_len = dl[pid]
-            term_idf = idf.get(term, 0)
-            denom = f + k1 * (1 - b + b * doc_len / avgdl)
-            score += term_idf * ((f * (k1 + 1)) / denom) if denom else 0
-        scores[pid] = score
-
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return ranked
-
-def search(query, k1=1.5, b=0.75, top_k=25):
-
-    if not os.path.exists("bm25_raw_data.joblib"):
-        raise FileNotFoundError("الملف 'bm25_raw_data.joblib' غير موجود. قم ببناء المصفوفة أولاً.")
-
-    if not os.path.exists("bm25_matrix.joblib"):
-        raise FileNotFoundError("الملف 'bm25_matrix.joblib' غير موجود. قم ببناء المصفوفة أولاً.")
-
-    query_terms = word_tokenize(query.lower())
-
-    raw_data = joblib.load("bm25_raw_data.joblib")
-    matrix_data = joblib.load("bm25_matrix.joblib")["data"]
-
-    term_freqs = raw_data["term_freqs"]
-    doc_lengths = raw_data["doc_lengths"]
-    avgdl = raw_data["avgdl"]
-    idf = raw_data["idf"]
-    vocab = list(idf.keys())
-    pids = list(term_freqs.keys())
-
-    matching_terms = [term for term in query_terms if term in vocab]
-    if not matching_terms:
-        return []
-
-    scores = {}
-    for pid in pids:
-        score = 0.0
-        doc_len = doc_lengths[pid]
-        for term in matching_terms:
-            tf = term_freqs[pid].get(term, 0)
-            term_idf = idf.get(term, 0)
-            denom = tf + k1 * (1 - b + b * doc_len / avgdl)
-            score += term_idf * ((tf * (k1 + 1)) / denom) if denom != 0 else 0
-        scores[pid] = score
-
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-
-    return [{"doc_id": pid, "score": round(score, 4)} for pid, score in ranked]
+    return [{"doc_id": pid, "score": round(score_map[pid], 4)} for pid in best_pids]

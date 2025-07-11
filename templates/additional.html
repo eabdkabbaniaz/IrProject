@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Query Processor</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background: linear-gradient(to right, #1f1c2c, #928dab);
+      min-height: 100vh;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      padding: 40px 0;
+    }
+
+    .container {
+      max-width: 600px;
+      background-color: rgba(0, 0, 0, 0.6);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.4);
+    }
+
+    .form-label {
+      font-weight: 500;
+    }
+
+    .form-control {
+      background-color: #2e2e2e;
+      border: 1px solid #444;
+      color: #fff;
+    }
+
+    .form-control:focus {
+      border-color: #6c63ff;
+      box-shadow: 0 0 0 0.2rem rgba(108, 99, 255, 0.25);
+    }
+
+    .btn-custom {
+      background: #605cb1;
+      border: none;
+      color: white;
+      font-weight: bold;
+    }
+
+    .btn-custom:hover {
+      background: linear-gradient(to right, #48c6ef, #6c63ff);
+    }
+
+    .result-box {
+      background-color: #1c1c1c;
+      padding: 20px;
+      border-radius: 15px;
+      margin-top: 30px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.1);
+    }
+
+    h2 {
+      font-weight: bold;
+      margin-bottom: 30px;
+    }
+
+    #autocomplete-list {
+      position: absolute;
+      background-color: #3a3f58;
+      border: 1px solid #555;
+      border-top: none;
+      max-height: 200px;
+      overflow-y: auto;
+      width: 100%;
+      z-index: 999;
+      border-radius: 0 0 10px 10px;
+    }
+
+    #autocomplete-list li {
+      padding: 10px;
+      color: #fff;
+      cursor: pointer;
+      list-style-type: none;
+    }
+
+    #autocomplete-list li:hover {
+      background-color: #6c63ff;
+    }
+
+    .position-relative {
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="text-center">Query Preprocessing</h2>
+    <form id="queryForm">
+      <div class="mb-3 position-relative">
+        <label for="query" class="form-label">Enter Query:</label>
+        <input type="text" class="form-control" id="query" name="query" required autocomplete="off" />
+        <ul id="autocomplete-list" class="list-group"></ul>
+      </div>
+      <button type="submit" class="btn btn-custom w-100">Submit</button>
+    </form>
+
+    <div id="result-box" class="result-box mt-4" style="display: none;"></div>
+  </div>
+
+  <script>
+    const queryInput = document.getElementById("query");
+    const resultBox = document.getElementById("result-box");
+    const autocompleteList = document.getElementById("autocomplete-list");
+
+    let timeout = null;
+
+    queryInput.addEventListener("input", function () {
+      const query = queryInput.value.trim();
+      clearTimeout(timeout);
+
+      if (query.length === 0) {
+        autocompleteList.innerHTML = "";
+        autocompleteList.style.display = "none";
+        return;
+      }
+
+      timeout = setTimeout(async () => {
+        try {
+          const response = await fetch("http://127.0.0.1:8000/autoComplete_query", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ query: query })
+          });
+
+          const data = await response.json();
+          const suggestions = data.message || [];
+
+          autocompleteList.innerHTML = suggestions.map(item => `
+            <li class="list-group-item bg-dark text-white border-light">${item}</li>
+          `).join("");
+
+          autocompleteList.style.display = "block";
+
+          document.querySelectorAll("#autocomplete-list li").forEach(item => {
+            item.addEventListener("click", () => {
+              queryInput.value = item.textContent;
+              autocompleteList.innerHTML = "";
+              autocompleteList.style.display = "none";
+            });
+          });
+
+        } catch (err) {
+          console.error("Error fetching auto-complete:", err);
+          autocompleteList.innerHTML = "";
+          autocompleteList.style.display = "none";
+        }
+      }, 300);
+    });
+
+    document.addEventListener("click", function (e) {
+      if (!document.getElementById("queryForm").contains(e.target)) {
+        autocompleteList.innerHTML = "";
+        autocompleteList.style.display = "none";
+      }
+    });
+
+    document.getElementById("queryForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const query = queryInput.value;
+
+      try {
+        // Step 1: Call correct_query
+        const correctionResponse = await fetch("http://127.0.0.1:8000/correct_query", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ query: query })
+        });
+
+        const correctionData = await correctionResponse.json();
+        const correctedQuery = correctionData.message || query;
+
+        let didYouMeanHTML = "";
+        if (correctedQuery.toLowerCase() !== query.toLowerCase()) {
+          didYouMeanHTML = `
+            <p><strong>Did you mean:</strong> 
+            <a href="#" id="didYouMean" style="color: #6c63ff;">${correctedQuery}</a></p>
+          `;
+        }
+
+        // Step 2: Call suggest_query
+        const suggestResponse = await fetch("http://127.0.0.1:8000/suggest_query", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ query: correctedQuery })
+        });
+
+        const suggestData = await suggestResponse.json();
+        const suggestions = suggestData.message || [];
+
+        // Step 3: Display results
+        resultBox.style.display = "block";
+        resultBox.innerHTML = `
+          ${didYouMeanHTML}
+          <h5>Original Query:</h5>
+          <p>${query}</p>
+          <h5>Suggested Queries:</h5>
+          <ul>${suggestions.map(item => `<li>${item}</li>`).join('')}</ul>
+        `;
+
+        // Step 4: Add listener to "Did you mean"
+        const didYouMeanLink = document.getElementById("didYouMean");
+        if (didYouMeanLink) {
+          didYouMeanLink.addEventListener("click", function (e) {
+            e.preventDefault();
+            queryInput.value = correctedQuery;
+            queryInput.focus();
+          });
+        }
+
+        autocompleteList.innerHTML = "";
+        autocompleteList.style.display = "none";
+
+      } catch (err) {
+        console.error("Error:", err);
+        resultBox.style.display = "block";
+        resultBox.innerHTML = "<p>حدث خطأ أثناء إرسال الطلب. حاول مرة أخرى.</p>";
+      }
+    });
+  </script>
+</body>
+</html>
