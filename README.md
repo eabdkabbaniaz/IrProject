@@ -90,4 +90,6 @@ cd IrProject
 pip install -r requirements.txt
 
 # Step 3: Start the API server
-uvicorn api.main:app --reload --port 8000
+uvicorn Interface:app --port 8000
+
+# Step 4: run main function in app.py
