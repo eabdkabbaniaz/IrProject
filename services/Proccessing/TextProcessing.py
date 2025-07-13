@@ -14,7 +14,7 @@ import spacy
 
 # Load spaCy model for advanced text processing
 nlp = spacy.load('en_core_web_sm')
-with open(r"D:\IrProject\datasets\dataset_antic\stop_words.txt", 'r',encoding='utf-8') as file:
+with open(r"C:\Users\user\Downloads\IrProject\IrProject\datasets\stop_words.txt", 'r',encoding='utf-8') as file:
     words_to_remove = file.read().splitlines()
 
 
